@@ -9,7 +9,11 @@ piste `.mka`, puis un `.mkv` final (VO + nouvelle piste) via mkvmerge.
 - Python 3.9+ : `python -m pip install numpy scipy`
 - `ffmpeg` et `ffprobe` : le script les cherche d'abord **dans son propre dossier** (ou `ffmpeg\` / `ffmpeg\bin\`
   à côté de lui), puis dans le PATH (ex. `C:\Apps\ffmpeg\bin`). On peut donc les poser à côté du script.
-- MKVToolNix (`mkvmerge`) pour l'assemblage final (sinon `--no-mux`, ou `--mkvmerge CHEMIN`)
+- `mkvmerge` (MKVToolNix) pour l'assemblage final : le script le cherche **dans son propre dossier**, puis dans
+  le PATH, puis dans `Program Files\MKVToolNix`. Sinon : `--no-mux` (pas d'assemblage), ou `--mkvmerge CHEMIN`.
+
+L'archive Windows de la Release contient déjà `ffmpeg.exe`, `ffprobe.exe` et `mkvmerge.exe` : il ne reste
+alors que Python et `numpy` / `scipy` à installer.
 
 ## Pour un nouveau film : pas à pas
 
@@ -106,8 +110,10 @@ Formats de temps acceptés : `1:12:01.36`, `72:01.36` ou `4321.36`.
 - **Défaut d'écoute à signaler** : note le temps (min:s), le sens (voix en avance/en retard), l'ampleur, et si
   le défaut est avant ou après le raccord.
 
-## ffmpeg et licence
+## Licences
 
 Les binaires `ffmpeg.exe` et `ffprobe.exe` fournis dans la Release sont des builds non modifiées de gyan.dev (https://www.gyan.dev/ffmpeg/builds/), sous licence GPL v3 (voir `LICENSE-ffmpeg.txt`). Le code source est disponible sur https://ffmpeg.org et dans le dépôt https://github.com/GyanD/codexffmpeg.
+
+Le binaire `mkvmerge.exe` fourni dans la Release est une build non modifiée de MKVToolNix (https://mkvtoolnix.download), sous licence GPL v2 (voir `LICENSE-mkvtoolnix.txt`). Le code source est disponible sur https://gitlab.com/mbunkus/mkvtoolnix.
 
 Le script `autosync_audio.py` lui-même est sous licence MIT (voir `LICENSE`). Cet outil ne distribue aucun contenu vidéo ou audio : il sert à recaler des fichiers que l'on possède.
