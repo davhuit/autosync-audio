@@ -105,3 +105,9 @@ Formats de temps acceptés : `1:12:01.36`, `72:01.36` ou `4321.36`.
   n'existe pas).
 - **Défaut d'écoute à signaler** : note le temps (min:s), le sens (voix en avance/en retard), l'ampleur, et si
   le défaut est avant ou après le raccord.
+
+## ffmpeg et licence
+
+Les binaires `ffmpeg.exe` et `ffprobe.exe` fournis dans la Release sont des builds non modifiées de gyan.dev (https://www.gyan.dev/ffmpeg/builds/), sous licence GPL v3 (voir `LICENSE-ffmpeg.txt`). Le code source est disponible sur https://ffmpeg.org et dans le dépôt https://github.com/GyanD/codexffmpeg.
+
+Le script `autosync_audio.py` lui-même est sous licence MIT (voir `LICENSE`). Cet outil ne distribue aucun contenu vidéo ou audio : il sert à recaler des fichiers que l'on possède.
