@@ -1,0 +1,7 @@
+*.mp4
+*.mkv
+*.mka
+*.wav
+tmp/
+__pycache__/
+CLAUDE.md
