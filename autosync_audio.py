@@ -624,6 +624,11 @@ def fmt(t):
 def find_mkvmerge(forced):
     if forced:
         return forced
+    here = os.path.dirname(os.path.abspath(__file__))
+    for name in ("mkvmerge.exe", "mkvmerge"):
+        c = os.path.join(here, name)
+        if os.path.isfile(c):
+            return c
     exe = shutil.which("mkvmerge")
     if exe:
         return exe
