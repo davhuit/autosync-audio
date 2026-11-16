@@ -584,22 +584,24 @@ def render(args, segs, ratio, ref_dur, src_stream, lay):
     files = []
     for k, (kind, t0, t1, o) in enumerate(pieces):
         D = t1 - t0
-        out = os.path.join(tmp, f"p{k:03d}.flac")
+        # morceaux intermédiaires en WAV (PCM 16 bits) : le FLAC pouvait faire échouer l'assemblage quand la taille
+        # de bloc du 1er morceau (ex. un silence) était plus petite que celle des suivants
+        out = os.path.join(tmp, f"p{k:03d}.wav")
         tail = f"apad=whole_dur={D:.6f},atrim=duration={D:.6f}"
         if kind == "src":
             s0, s1 = (t0 - o) * ratio, (t1 - o) * ratio
             ffrun([FFMPEG, "-v", "error", "-y", "-ss", f"{s0:.4f}", "-t", f"{s1 - s0:.4f}", "-i", args.src,
                    "-map", f"0:a:{args.src_track}", "-vn",
-                   "-af", f"{speed},{common},{tail}", "-c:a", "flac", out])
+                   "-af", f"{speed},{common},{tail}", "-c:a", "pcm_s16le", "-rf64", "auto", out])
             what = "source"
         elif args.fill_ref:
             ffrun([FFMPEG, "-v", "error", "-y", "-ss", f"{t0:.4f}", "-t", f"{D:.4f}", "-i", args.ref,
                    "-map", f"0:a:{args.ref_track}", "-vn",
-                   "-af", f"{common},{tail}", "-c:a", "flac", out])
+                   "-af", f"{common},{tail}", "-c:a", "pcm_s16le", "-rf64", "auto", out])
             what = "audio de --ref"
         else:
             ffrun([FFMPEG, "-v", "error", "-y", "-f", "lavfi", "-i", f"anullsrc=r=48000:cl={lay}",
-                   "-t", f"{D:.6f}", "-af", common, "-c:a", "flac", out])
+                   "-t", f"{D:.6f}", "-af", common, "-c:a", "pcm_s16le", "-rf64", "auto", out])
             what = "silence"
         files.append(out)
         log(f"  morceau {k + 1}/{len(pieces)} : {fmt(t0)} -> {fmt(t1)} ({what})")
@@ -710,6 +712,29 @@ def main():
                     help="contraste minimal des images pour valider un raccord (défaut 0.15)")
     ap.add_argument("--close-gaps", type=float, default=6.0,
                     help="comble les trous (s) entre segments dont le raccord n'est pas confirmé par l'image (0 = non)")
+    ap.add_argument("--shift", type=float, default=0.0, metavar="SEC",
+                    help="ajoute SEC secondes au décalage de tous les segments (correction manuelle après écoute). "
+                         "Négatif = le son de la source arrive plus tôt, positif = plus tard. "
+                         "Ex. --shift -0.10 si la voix est en retard de 0,1 s sur les lèvres. Appliqué avant "
+                         "--extend-start / --extend-end. 0 = désactivé (défaut)")
+    ap.add_argument("--shift-after", action="append", default=None, metavar="TEMPS=SEC",
+                    help="comme --shift, mais seulement pour les segments qui commencent à TEMPS ou après "
+                         "(répétable). Ex. --shift-after 10:06.48=-0.20 : le segment qui démarre à 10:06.48 (et les "
+                         "suivants) reçoit -0,20 s, le segment d'avant reste intact. Négatif = son plus tôt. "
+                         "Appliqué après --shift, avant --extend-start / --extend-end")
+    ap.add_argument("--extend-start", type=float, default=0.0, metavar="SEC",
+                    help="si le 1er segment commence avant SEC secondes, le prolonge jusqu'au début de --ref "
+                         "(même décalage). Utile quand le début est parlé en VF : la corrélation y est faible "
+                         "et le script rogne ~3 s. 0 = désactivé (défaut)")
+    ap.add_argument("--extend-end", type=float, default=0.0, metavar="SEC",
+                    help="si le dernier segment se termine à moins de SEC secondes de la fin de --ref, le prolonge "
+                         "jusqu'à la fin de --ref (ou de la source si elle finit avant), même décalage. Utile quand la "
+                         "corrélation est trop faible en fin d'épisode et que le script s'arrête trop tôt "
+                         "(ex. --extend-end 240). 0 = désactivé (défaut)")
+    ap.add_argument("--start-at", type=float, default=None, metavar="SEC",
+                    help="force le début du 1er segment à SEC secondes de --ref (avant : audio de --ref avec "
+                         "--fill-ref, sinon silence). Sert à ne pas garder le bout d'un mot de la source coupé net "
+                         "au début ; à placer dans une pause de la source, ex. --start-at 0.35. Appliqué après --extend-start")
     ap.add_argument("--cut", action="append", default=None, metavar="ANCIEN=NOUVEAU",
                     help="déplace un raccord (répétable), ex. --cut 1:12:01=1:11:59.8 ; "
                          "remplace DEFAULT_CUTS du script ; --cut none = aucun déplacement")
@@ -849,6 +874,61 @@ def main():
         log("\nRaccords répartis dans les pauses (--stair)...")
         for spec in stairs:
             apply_stair(segs, spec)
+
+    if args.shift != 0 and segs:
+        log(f"\nCorrection manuelle du décalage (--shift {args.shift:+g} s) :")
+        for sg in segs:
+            old = sg["o"]
+            sg["o"] += args.shift
+            sg["t0"] = max(sg["t0"], sg["o"])                              # pas de temps source < 0
+            sg["t1"] = min(sg["t1"], len(src) / ENV_HZ + sg["o"], ref_dur)  # pas au-delà de la fin de la source
+            log(f"  segment {fmt(sg['t0'])} -> {fmt(sg['t1'])} : décalage {old:+.2f} -> {sg['o']:+.2f} s")
+
+    if args.shift_after and segs:
+        for spec in args.shift_after:
+            try:
+                tt, dd = spec.split("=")
+                T, D = parse_t(tt), float(dd)
+            except ValueError:
+                sys.exit(f"--shift-after : format attendu 10:06.48=-0.20 (reçu : {spec})")
+            log(f"\nCorrection manuelle à partir de {fmt(T)} (--shift-after {D:+g} s) :")
+            hit = False
+            for sg in segs:
+                if sg["t0"] >= T - 1.0:
+                    hit = True
+                    old = sg["o"]
+                    sg["o"] += D
+                    sg["t1"] = min(sg["t1"], len(src) / ENV_HZ + sg["o"], ref_dur)  # pas au-delà de la fin de la source
+                    log(f"  segment {fmt(sg['t0'])} -> {fmt(sg['t1'])} : décalage {old:+.2f} -> {sg['o']:+.2f} s")
+            if not hit:
+                log(f"  aucun segment ne commence à {fmt(T)} ou après, ignoré")
+
+    if args.extend_start > 0 and segs and segs[0]["t0"] <= args.extend_start:
+        s0 = segs[0]
+        new0 = max(0.0, s0["o"])                                   # pas de temps source < 0
+        if new0 < s0["t0"] - 0.01:
+            log(f"\nDébut prolongé (--extend-start) : le 1er segment commence à {fmt(new0)} au lieu de {fmt(s0['t0'])}")
+            s0["t0"] = new0
+
+    if args.extend_end > 0 and segs:
+        sl = segs[-1]
+        new1 = min(ref_dur, len(src) / ENV_HZ + sl["o"])           # pas au-delà de la fin de la source
+        if new1 > sl["t1"] + 0.01:
+            if ref_dur - sl["t1"] <= args.extend_end:
+                log(f"\nFin prolongée (--extend-end) : le dernier segment se termine à {fmt(new1)} au lieu de {fmt(sl['t1'])}")
+                sl["t1"] = new1
+            else:
+                log(f"\n--extend-end {args.extend_end:g} : le dernier segment finit à {fmt(ref_dur - sl['t1'])} s de la fin, "
+                    f"trop loin, ignoré")
+
+    if args.start_at is not None and segs:
+        s0 = segs[0]
+        new0 = max(args.start_at, s0["o"])                         # pas de temps source < 0
+        if new0 < s0["t1"] - 1.0:
+            log(f"\nDébut forcé (--start-at) : le 1er segment commence à {fmt(new0)} au lieu de {fmt(s0['t0'])}")
+            s0["t0"] = new0
+        else:
+            log(f"\n--start-at {args.start_at:g} : position hors du 1er segment, ignoré")
 
     log("\nSegments retenus (temps ref <- temps src corrigé de la vitesse) :")
     covered = 0.0
